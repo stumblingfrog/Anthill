@@ -1,4 +1,7 @@
-﻿namespace Anthill.Hub;
+﻿using System.Buffers;
+using System.Collections.Generic;
+
+namespace Anthill.Hub;
 
 public sealed class Trail
 {
@@ -8,14 +11,14 @@ public sealed class Trail
 
     public void Subscribe<T>(Action<T> action, bool withAncestors = false)
     {
-        this.GetHandler<T>(withAncestors).AddSubsciber(action);
+        this.GetOrCreateHandler<T>(withAncestors).AddSubsciber(action);
     }
 
     public void Publish<T>(T message)
     {
         ArgumentNullException.ThrowIfNull(message);
 
-        this.FindHandler<T>()?.Handle(message);
+        this.HandleMessage<T>(message);
     }
 
     internal void RegisterPlugin<T>(T plugin)
@@ -61,7 +64,7 @@ public sealed class Trail
             
     }
 
-    private Handler<T> GetHandler<T>(bool withAncestors)
+    private Handler<T> GetOrCreateHandler<T>(bool withAncestors)
     {
         this.readerWriterLock.EnterUpgradeableReadLock();
         try
@@ -107,24 +110,39 @@ public sealed class Trail
         }
     }
 
-    private IHandler? FindHandler<T>()
+    private void HandleMessage<T>(T message)
     {
-        this.readerWriterLock.EnterReadLock();
+        var handlersCount = this.handlers.Count();
+        var activeHandlers = ArrayPool<IHandler>.Shared.Rent(handlersCount);
         try
         {
-            for (var i = 0; i < this.handlers.Count(); i++)
+            var count = 0;
+            this.readerWriterLock.EnterReadLock();
+            try
             {
-                var current = handlers[i];
-                if (current.IsMatch<T>())
+                for (var i = 0; i < handlersCount; i++)
                 {
-                    return current;
+                    var current = handlers[i];
+                    if (current.IsMatch<T>())
+                    {
+                        activeHandlers[count] = current;
+                        count++;
+                    }
                 }
             }
-            return null;
+            finally
+            {
+                this.readerWriterLock.ExitReadLock();
+            }
+
+            for (var i = 0; i < count; i++)
+            {
+                activeHandlers[i].Handle(message);
+            }
         }
         finally
         {
-            this.readerWriterLock.ExitReadLock();
+            ArrayPool<IHandler>.Shared.Return(activeHandlers);
         }
     }
 }

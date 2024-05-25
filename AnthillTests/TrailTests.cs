@@ -43,7 +43,7 @@ public class TrailTests
         trail.Publish(new Base());
         trail.Publish(new Derived());
 
-        Assert.AreEqual(1, this.baseCollector);
+        Assert.AreEqual(2, this.baseCollector); // Handle message for Base and derived - base include ancestors
         Assert.AreEqual(1, this.derivedCollector);
     }
 
